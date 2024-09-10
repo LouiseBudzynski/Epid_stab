@@ -2,6 +2,7 @@ using Random
 
 mutable struct ParametricModel_1graph{D,D2,M,M1,M2,O,Tλ}
     N::Int
+    Nedges::Int
     T::Int
     γp::Float64
     λp::Float64
@@ -32,18 +33,21 @@ function ParametricModel_1graph(; N, T, γp, λp, γi=γp, λi=λp, fr=0.0, dilu
 
     G=makeGraph(N,distribution);
     Neigh = Vector{Int64}[]
+    Nedges=0
     for i in vertices(G)
         neigh = Int64[j for j in outneighbors(G,i)]
         append!(Neigh,[neigh])
+        Nedges += length(outneighbors(G,i))
     end    
-    x=Bool.(zeros(N,T))
+    Nedges=Int64(Nedges/2)
+    x=Bool.(zeros(N,T+1))
     sample!(x,G,λp,γp)
-    Observations=x[:,T]
-    ParametricModel_1graph(N, T, γp, λp,γi, λi, μ, mom1μ, belief, ν, tmpν, mom1ν,fr, distribution, residual(distribution), Λ,Neigh,Observations)
+    Observations=x[:,T+1]
+    ParametricModel_1graph(N, Nedges, T, γp, λp,γi, λi, μ, mom1μ, belief, ν, tmpν, mom1ν,fr, distribution, residual(distribution), Λ,Neigh,Observations)
 
 end
 
-function obs_1graph(ti::Int64, oi::Bool)
+function obs_1graph(M::ParametricModel_1graph, ti::Int64, oi::Bool)
     @unpack T, fr = M
     xT=(ti<=T)
     res = xT==oi ? (1.0 - fr) : fr
@@ -51,13 +55,13 @@ function obs_1graph(ti::Int64, oi::Bool)
 end
 
 function calculate_ν_1graph!(M::ParametricModel_1graph, i::Int64, j::Int64, oi::Bool)
-    @unpack ν, μ, Neigh, γi, Λ = M
+    @unpack ν, μ, Neigh, γi, T, Λ = M
     ind_ij=findall(Neigh[i].==j)[1]
     if (length(ind_ij)> 1) error("double edges") end
     neigh=[Neigh[i][1:ind_ij-1];Neigh[i][ind_ij+1:end]]
     ν .= 0.0
     for ti=0:T+1
-        ξ=obs_1graph(ti,oi)
+        ξ=obs_1graph(M, ti,oi)
         if (ξ == 0.0) continue end
         seed= ti == 0 ? γi : 1.0-γi
         phi = ti == 0 || ti == T + 1 ? 0 : 1
@@ -78,15 +82,43 @@ function calculate_ν_1graph!(M::ParametricModel_1graph, i::Int64, j::Int64, oi:
     if (z_ij <= zero(eltype(ν))) error("sum(ν)=", z_ij) end    
     return z_ij
 end
-
-function calculate_ν_1graph_stab!()
+function calculate_ν_1graph_stab!(M::ParametricModel_1graph, i::Int64, j::Int64, m::Int64, oi::Bool)
+    @unpack μ, tmpν, mom1μ, Neigh, γi, T, Λ = M
+    ind_ij=findall(Neigh[i].==j)[1]
+    if (length(ind_ij)> 1) error("double edges") end
+    neigh=[Neigh[i][1:ind_ij-1];Neigh[i][ind_ij+1:end]]
+    tmpν .= 0.0
+    for ti=0:T+1
+        ξ=obs_1graph(M, ti,oi)
+        if (ξ == 0.0) continue end
+        seed= ti == 0 ? γi : 1.0-γi
+        phi = ti == 0 || ti == T + 1 ? 0 : 1
+        m0,m1 = one(eltype(μ)), one(eltype(μ))
+        for k in neigh
+            ind_ki=findall(Neigh[k].==i)[1]
+            if (length(ind_ki)> 1) error("double edges") end
+            if k==m
+                m0 *= mom1μ[ti,0,ind_ki,k]
+                m1 *= mom1μ[ti,1,ind_ki,k]                
+            else
+                m0 *= μ[ti,0,ind_ki,k]
+                m1 *= μ[ti,1,ind_ki,k]
+            end
+        end
+        for tj = 0:T+1
+            tmpν[ti,tj] = seed*ξ*(m1*Λ[ti-tj-1] - phi*m0*Λ[ti-tj])
+        end
+    end
+    z_ijm = sum(tmpν)
+    if (any(isnan.(tmpν))) error("NaN in tmpν") end 
+    return z_ijm
 end
 
 function calculate_belief_1graph!(M::ParametricModel_1graph, i::Int64, oi::Bool)
-    @unpack belief, μ, Neigh, γi= M
+    @unpack belief, μ, Neigh, γi, T = M
     belief[:,i].=zero(eltype(belief))
     for ti=0:T+1
-        ξ=obs_1graph(ti,oi)
+        ξ=obs_1graph(M, ti,oi)
         if (ξ == 0.0) continue end
         seed= ti == 0 ? γi : 1.0-γi
         phi = ti == 0 || ti == T + 1 ? 0 : 1
@@ -107,7 +139,7 @@ function calculate_belief_1graph!(M::ParametricModel_1graph, i::Int64, oi::Bool)
 end
 
 function update_μ_1graph!(M::ParametricModel_1graph, i::Int64, j::Int64)
-    @unpack ν, μ, Λ, Neigh = M
+    @unpack ν, μ, Λ, Neigh, T = M
     ind_ij=findall(Neigh[i].==j)[1]
     if (length(ind_ij)> 1) error("double edges") end    
     μ[:,:,ind_ij, i].=zero(eltype(μ))
@@ -126,41 +158,99 @@ function update_μ_1graph!(M::ParametricModel_1graph, i::Int64, j::Int64)
     if (S<=0) error("sum-zero μ") end
     return
 end
-
-function update_momμ_1graph!()
+function update_μ_1graph_stab!(M::ParametricModel_1graph, i::Int64, j::Int64)
+    @unpack mom1ν, mom1μ, Λ, Neigh, T = M
+    ind_ij=findall(Neigh[i].==j)[1]
+    if (length(ind_ij)> 1) error("double edges") end    
+    mom1μ[:,:,ind_ij, i].=zero(eltype(mom1μ))
+    for tj=0:T+1
+        m0,m1 = zero(eltype(mom1μ)), zero(eltype(mom1μ))
+        for ti=0:T+1
+            m0+=mom1ν[ti,tj]*Λ[tj-ti]
+            m1+=mom1ν[ti,tj]*Λ[tj-ti-1]
+        end
+        mom1μ[tj,0,ind_ij,i]=m0
+        mom1μ[tj,1,ind_ij,i]=m1
+    end
+    if (any(isnan.(mom1μ[:,:,ind_ij,i]))) error("Nan in mom1μ") end
+    return
 end
 
 function sweep_1graph!(M::ParametricModel_1graph)
-    @unpack N, Neigh, ν, Observations = M
-    F=0.0
-    for i in 1:N #shuffle(1:N)
+    @unpack N, Nedges, Neigh, ν, belief, Observations = M
+    F_i=0.0
+    F_ij=0.0    
+    for i in shuffle(1:N)
         oi=Observations[i]
         di=length(Neigh[i])
-        for j in Neigh[i] #shuffle(Neigh[i])
+        for j in shuffle(Neigh[i])
             zψij=calculate_ν_1graph!(M,i,j,oi)
             ν./=zψij
             update_μ_1graph!(M,i,j)
-            F += -0.5*log(zψij)
+            F_ij += log(zψij)
         end
         z_i = calculate_belief_1graph!(M, i, oi)
-        F += (0.5*di-1.0)*log(z_i)
+        belief[:,i]./=z_i
+        F_i += (0.5*di-1.0)*log(z_i)
     end
-    return F/N
+    #@show F_ij/N, F_i/N
+    F=F_i-0.5*F_ij
+    return F/Nedges
 end
-function sweep_1graph_stab!(M::ParametricModel_1graph)
-
+function sweep_1graph_stab!(M::ParametricModel_1graph, iter::Int64, maxiter::Int64; nbstab = round(maxiter/2))
+    @unpack N, Nedges, T, Neigh, ν, tmpν, mom1ν, belief, Observations = M
+    F_i=0.0
+    F_ij=0.0    
+    Δ=0.0
+    for i in shuffle(1:N)
+        oi=Observations[i]
+        neighs_i=Neigh[i]
+        di=length(neighs_i)
+        for j in shuffle(neighs_i)
+            mom1ν.=0.0
+            zψij=calculate_ν_1graph!(M,i,j,oi)
+            if (iter > maxiter - nbstab)
+                ind_ij=findall(neighs_i.==j)[1]
+                neighs_ij=[neighs_i[1:ind_ij-1];neighs_i[ind_ij+1:end]]
+                for m in neighs_ij
+                    zψijm=calculate_ν_1graph_stab!(M,i,j,m,oi)
+                    mom1ν .+= tmpν .- ν.*(zψijm/zψij)
+                end
+                mom1ν./=zψij
+                update_μ_1graph_stab!(M,i,j)
+                Δ+=sqrt(sum(mom1ν .* mom1ν))/(T+2)
+            end
+            ν./=zψij
+            update_μ_1graph!(M,i,j)
+            F_ij += log(zψij)
+        end
+        z_i = calculate_belief_1graph!(M, i, oi)
+        belief[:,i]./=z_i
+        F_i += (0.5*di-1.0)*log(z_i)
+    end
+    #@show F_ij/N, F_i/N
+    F=F_i-0.5*F_ij
+    if (iter > maxiter - nbstab)
+        Δ/=Nedges
+        return F/N, Δ
+    else
+        return F/N, -1
+    end
 end
 
 function pop_dynamics_1graph(M::ParametricModel_1graph; tot_iter=5)
     F=0.0
-    F_window=zeros(10)
-    converged=false
-    err=-1
     println("#1.iter 2.F")
     for iterations=1:tot_iter
         F=sweep_1graph!(M)
         println(iterations, "\t", F)
     end
 end
-function pop_dynamics_1graph_stab()
+function pop_dynamics_1graph_stab(M::ParametricModel_1graph; tot_iter=5)
+    F=0.0
+    println("#1.iter 2.F 3.Δ")
+    for iterations=1:tot_iter
+        F, Δ = sweep_1graph_stab!(M, iterations, tot_iter)
+        println(iterations, "\t", F, "\t", Δ)
+    end
 end

@@ -186,7 +186,7 @@ function sweep!(M)
         zψi = calculate_belief!(M,l,neighbours,xi0,oi,sympt,ci,ti_obs)
         Fψi += (0.5 * d - 1) * log(zψi) 
     end
-    
+    #@show F_itoj/N, Fψi/N
     return (Fψi - 0.5 * F_itoj) / N 
 end
 
