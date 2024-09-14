@@ -33,6 +33,7 @@ function main(args)
     println("#param=[T, λp, λi, γp, γi, N, dilution, fr, degree_dist]=", param)
     #init pop
     M=ParametricModel_1graph(N=N,T=T,γp=γp,λp=λp,γi=γi,λi=λi,fr=fr,dilution=dilution,distribution=degree_dist,maxd=maxd);
+    correct_IC_μ(M)
     #iterations
     pop_dynamics_1graph_stab(M, tot_iter=arg_maxiter)
     return 0

@@ -46,7 +46,20 @@ function ParametricModel_1graph(; N, T, γp, λp, γi=γp, λi=λp, fr=0.0, dilu
     ParametricModel_1graph(N, Nedges, T, γp, λp,γi, λi, μ, mom1μ, belief, ν, tmpν, mom1ν,fr, distribution, residual(distribution), Λ,Neigh,Observations)
 
 end
-
+function correct_IC_μ(M::ParametricModel_1graph)
+    @unpack T, μ, Λ = M
+    μ.=0.0
+    for i in 1:N
+        for deg in 1:maxd
+            for ti in 0:T+1
+                for tj in 0:T+1
+                    μ[tj,0,deg,i]+=Λ[tj-ti]/((T+2)^2)
+                    μ[tj,1,deg,i]+=Λ[tj-ti-1]/((T+2)^2)
+                end
+            end
+        end
+    end
+end
 function obs_1graph(M::ParametricModel_1graph, ti::Int64, oi::Bool)
     @unpack T, fr = M
     xT=(ti<=T)
@@ -278,7 +291,6 @@ function pop_dynamics_1graph_stab(M::ParametricModel_1graph; tot_iter=5)
     println("#1.iter 2.F 3.Δ")
     flush(stdout)
     for iterations=1:tot_iter
-        println(iterations, "\n")
         flush(stdout)
         F, Δ = sweep_1graph_stab!(M, iterations, tot_iter)
         println(iterations, "\t", F, "\t", Δ)
