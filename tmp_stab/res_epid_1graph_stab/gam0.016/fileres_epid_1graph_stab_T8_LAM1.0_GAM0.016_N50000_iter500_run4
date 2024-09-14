@@ -1,0 +1,2 @@
+#param=[T, λp, λi, γp, γi, N, dilution, fr, degree_dist]=Any[8, 1.0, 1.0, 0.016, 0.016, 50000, 0.0, 0.0, Dirac{Int64}(value=3)]
+#1.iter 2.F 3.Δ

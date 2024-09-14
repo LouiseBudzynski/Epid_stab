@@ -23,7 +23,7 @@ mutable struct ParametricModel_1graph{D,D2,M,M1,M2,O,Tλ}
 end
 
 function ParametricModel_1graph(; N, T, γp, λp, γi=γp, λi=λp, fr=0.0, dilution=0.0, distribution, maxd)
-    μ = fill(1.0 / ((T+2)^2), 0:T+1, 0:1, maxd, N)
+    μ = fill(1.0 / (2*(T+2)), 0:T+1, 0:1, maxd, N)
     mom1μ = OffsetArray(rand(-1:2:1, T+2, 2, maxd, N).*0.00001, 0:T+1, 0:1, 1:maxd, 1:N)
     belief = fill(0.0, 0:T+1, N)
     ν = fill(0.0, 0:T+1, 0:T+1)
@@ -52,6 +52,31 @@ function obs_1graph(M::ParametricModel_1graph, ti::Int64, oi::Bool)
     xT=(ti<=T)
     res = xT==oi ? (1.0 - fr) : fr
     return res
+end
+
+function makeGraph(Ngraph,degree_dist::Dirac)
+    return random_regular_graph(Ngraph,degree_dist.value) |> IndexedBiDiGraph 
+end
+function sample!(x, G, λi, γi)
+    x .= 0
+    N, T = size(x)
+    for i=1:N
+        x[i,1] = rand() < γi
+    end
+    for t = 2:T
+        for i = 1:N
+            if x[i,t-1] == 1
+                x[i,t] = 1
+                continue
+            end
+            r = 1
+            for j in inedges(G,i)
+                r *= 1 - λi * x[j.src,t-1] 
+            end
+            x[i,t] = rand() > r
+        end
+    end
+    x
 end
 
 function calculate_ν_1graph!(M::ParametricModel_1graph, i::Int64, j::Int64, oi::Bool)
@@ -180,7 +205,7 @@ function sweep_1graph!(M::ParametricModel_1graph)
     @unpack N, Nedges, Neigh, ν, belief, Observations = M
     F_i=0.0
     F_ij=0.0    
-    for i in shuffle(1:N)
+    for i in 1:N #shuffle(1:N)
         oi=Observations[i]
         di=length(Neigh[i])
         for j in shuffle(Neigh[i])
@@ -241,16 +266,22 @@ end
 function pop_dynamics_1graph(M::ParametricModel_1graph; tot_iter=5)
     F=0.0
     println("#1.iter 2.F")
+    flush(stdout)
     for iterations=1:tot_iter
         F=sweep_1graph!(M)
         println(iterations, "\t", F)
+        flush(stdout)
     end
 end
 function pop_dynamics_1graph_stab(M::ParametricModel_1graph; tot_iter=5)
     F=0.0
     println("#1.iter 2.F 3.Δ")
+    flush(stdout)
     for iterations=1:tot_iter
+        println(iterations, "\n")
+        flush(stdout)
         F, Δ = sweep_1graph_stab!(M, iterations, tot_iter)
         println(iterations, "\t", F, "\t", Δ)
+        flush(stdout)
     end
 end
