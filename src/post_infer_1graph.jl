@@ -1,6 +1,7 @@
 using Random
 
-mutable struct ParametricModel_1graph{D,D2,M,M1,M2,O,Tλ}
+#mutable struct ParametricModel_1graph{D,D2,M,M1,M2,O,Tλ}
+mutable struct ParametricModel_1graph{M,M1,M2,O,Tλ}
     N::Int
     Nedges::Int
     T::Int
@@ -15,21 +16,29 @@ mutable struct ParametricModel_1graph{D,D2,M,M1,M2,O,Tλ}
     tmpν::M1
     mom1ν::M1
     fr::Float64
-    distribution::D
-    residual::D2
     Λ::O
     Neigh::Vector{Vector{Int64}}
     Observations::BitVector
 end
 
 function ParametricModel_1graph(; N, T, γp, λp, γi=γp, λi=λp, fr=0.0, dilution=0.0, distribution, maxd)
-    μ = fill(1.0 / (2*(T+2)), 0:T+1, 0:1, maxd, N)
+    Λ = OffsetArray([t <= 0 ? 1.0 : (1-λi)^t for t = -T-2:T+1], -T-2:T+1)
+    μ = fill(0.0, 0:T+1, 0:1, maxd, N)
+    for i in 1:N
+        for deg in 1:maxd
+            for ti in 0:T+1
+                for tj in 0:T+1
+                    μ[tj,0,deg,i]+=Λ[tj-ti]/((T+2)^2)
+                    μ[tj,1,deg,i]+=Λ[tj-ti-1]/((T+2)^2)
+                end
+            end
+        end
+    end
     mom1μ = OffsetArray(rand(-1:2:1, T+2, 2, maxd, N).*0.00001, 0:T+1, 0:1, 1:maxd, 1:N)
     belief = fill(0.0, 0:T+1, N)
     ν = fill(0.0, 0:T+1, 0:T+1)
     tmpν = fill(0.0, 0:T+1, 0:T+1)
     mom1ν = fill(0.0, 0:T+1, 0:T+1)
-    Λ = OffsetArray([t <= 0 ? 1.0 : (1-λi)^t for t = -T-2:T+1], -T-2:T+1)
 
     G=makeGraph(N,distribution);
     Neigh = Vector{Int64}[]
@@ -43,23 +52,10 @@ function ParametricModel_1graph(; N, T, γp, λp, γi=γp, λi=λp, fr=0.0, dilu
     x=Bool.(zeros(N,T+1))
     sample!(x,G,λp,γp)
     Observations=x[:,T+1]
-    ParametricModel_1graph(N, Nedges, T, γp, λp,γi, λi, μ, mom1μ, belief, ν, tmpν, mom1ν,fr, distribution, residual(distribution), Λ,Neigh,Observations)
+    ParametricModel_1graph(N, Nedges, T, γp, λp,γi, λi, μ, mom1μ, belief, ν, tmpν, mom1ν,fr, Λ,Neigh,Observations)
 
 end
-function correct_IC_μ(M::ParametricModel_1graph)
-    @unpack T, μ, Λ = M
-    μ.=0.0
-    for i in 1:N
-        for deg in 1:maxd
-            for ti in 0:T+1
-                for tj in 0:T+1
-                    μ[tj,0,deg,i]+=Λ[tj-ti]/((T+2)^2)
-                    μ[tj,1,deg,i]+=Λ[tj-ti-1]/((T+2)^2)
-                end
-            end
-        end
-    end
-end
+
 function obs_1graph(M::ParametricModel_1graph, ti::Int64, oi::Bool)
     @unpack T, fr = M
     xT=(ti<=T)
@@ -215,7 +211,7 @@ function update_μ_1graph_stab!(M::ParametricModel_1graph, i::Int64, j::Int64)
 end
 
 function sweep_1graph!(M::ParametricModel_1graph)
-    @unpack N, Nedges, Neigh, ν, belief, Observations = M
+    @unpack N, Neigh, ν, belief, Observations = M
     F_i=0.0
     F_ij=0.0    
     for i in 1:N #shuffle(1:N)
@@ -233,7 +229,7 @@ function sweep_1graph!(M::ParametricModel_1graph)
     end
     #@show F_ij/N, F_i/N
     F=F_i-0.5*F_ij
-    return F/Nedges
+    return F/N
 end
 function sweep_1graph_stab!(M::ParametricModel_1graph, iter::Int64, maxiter::Int64; nbstab = round(maxiter/2))
     @unpack N, Nedges, T, Neigh, ν, tmpν, mom1ν, belief, Observations = M
@@ -247,6 +243,7 @@ function sweep_1graph_stab!(M::ParametricModel_1graph, iter::Int64, maxiter::Int
         for j in shuffle(neighs_i)
             mom1ν.=0.0
             zψij=calculate_ν_1graph!(M,i,j,oi)
+            F_ij += log(zψij)
             if (iter > maxiter - nbstab)
                 ind_ij=findall(neighs_i.==j)[1]
                 neighs_ij=[neighs_i[1:ind_ij-1];neighs_i[ind_ij+1:end]]
@@ -260,7 +257,6 @@ function sweep_1graph_stab!(M::ParametricModel_1graph, iter::Int64, maxiter::Int
             end
             ν./=zψij
             update_μ_1graph!(M,i,j)
-            F_ij += log(zψij)
         end
         z_i = calculate_belief_1graph!(M, i, oi)
         belief[:,i]./=z_i

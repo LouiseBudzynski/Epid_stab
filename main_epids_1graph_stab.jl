@@ -1,14 +1,8 @@
 import OffsetArrays
-using Plots
-using Revise
 using StatsBase
-using ProgressMeter
-using SparseArrays, LinearAlgebra, IndexedGraphs, Graphs
+using Graphs, IndexedGraphs
 using Distributions,UnPack,OffsetArrays
 srcpath = "./src"
-include("$srcpath/bp.jl") 
-include("$srcpath/observables.jl") 
-#include("$srcpath/single_instance.jl") 
 include("$srcpath/post_infer_1graph.jl") 
 
 function main(args)
@@ -33,7 +27,6 @@ function main(args)
     println("#param=[T, λp, λi, γp, γi, N, dilution, fr, degree_dist]=", param)
     #init pop
     M=ParametricModel_1graph(N=N,T=T,γp=γp,λp=λp,γi=γi,λi=λi,fr=fr,dilution=dilution,distribution=degree_dist,maxd=maxd);
-    correct_IC_μ(M)
     #iterations
     pop_dynamics_1graph_stab(M, tot_iter=arg_maxiter)
     return 0
