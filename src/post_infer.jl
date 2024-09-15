@@ -54,8 +54,6 @@ Constructor of the ParametricModel struct.
 """
 function ParametricModel(; N, T, γp, λp, γi=γp, λi=λp, fr=0.0, dilution=0.0, distribution, obs_range=T:T,field=0.0,p_sympt_pla=0.0,p_test_pla=1-dilution,p_sympt_inf=p_sympt_pla,p_test_inf=p_test_pla)
     μ = fill(one(λi * p_sympt_inf) / (6*(T+2)^2), 0:T+1, 0:1, 0:T+1, 0:2, 1:N)
-    #mom1μ = OffsetArray(rand(T+2, 2, T+2, 3, N)*0.1, 0:T+1, 0:1, 0:T+1, 0:2, 1:N)
-    #mom1μ = OffsetArray((rand(T+2, 2, T+2, 3, N).-0.5).*0.0001, 0:T+1, 0:1, 0:T+1, 0:2, 1:N)
     mom1μ = OffsetArray(rand(-1:2:1, T+2, 2, T+2, 3, N).*0.00001, 0:T+1, 0:1, 0:T+1, 0:2, 1:N)
     belief = fill(zero(λi * p_sympt_inf), 0:T+1, 0:T+1, N)
     ν = fill(zero(λi * p_sympt_inf), 0:T+1, 0:T+1, 0:T+1, 0:2)
@@ -269,6 +267,14 @@ function pop_dynamics_stab(M; filepr="", tot_iterations = 5, nbstab = round(tot_
     F_window = zeros(10)
     converged = false
     err=-1
+
+    #correct initial condition
+    M.ν.=1/((T+1)^4)
+    for l in 1:N
+        (xi0, sij, sji, d, oi, sympt, ci, ti_obs) = rand_disorder(M, degree_dist)
+        update_μ!(M,l,sij, sji)
+    end
+    
     println("#1.iter 2.err 3.F 4. Δ")
     for iterations = 0:tot_iterations-1
         F, Δ = sweep_stab!(M, iterations, tot_iterations, nbstab=nbstab) 
@@ -302,6 +308,14 @@ function pop_dynamics(M; tot_iterations = 5, tol = 1e-10, eta = 0.0, infer_lam=f
     gam_window = zeros(10)
     sympt_window = zeros(10)
     err=-1
+
+    #correct initial condition
+    M.ν.=1/((T+1)^4)
+    for l in 1:N
+        (xi0, sij, sji, d, oi, sympt, ci, ti_obs) = rand_disorder(M, degree_dist)
+        update_μ!(M,l,sij, sji)
+    end
+
     println("#1.iter 2.err 3.F")
     for iterations = 0:tot_iterations-1
         wflag = mod(iterations,10)+1
