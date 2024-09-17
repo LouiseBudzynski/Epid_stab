@@ -214,7 +214,7 @@ function sweep_1graph!(M::ParametricModel_1graph)
     @unpack N, Neigh, ν, belief, Observations = M
     F_i=0.0
     F_ij=0.0    
-    for i in 1:N #shuffle(1:N)
+    for i in shuffle(1:N)
         oi=Observations[i]
         di=length(Neigh[i])
         for j in shuffle(Neigh[i])
@@ -227,7 +227,6 @@ function sweep_1graph!(M::ParametricModel_1graph)
         belief[:,i]./=z_i
         F_i += (0.5*di-1.0)*log(z_i)
     end
-    #@show F_ij/N, F_i/N
     F=F_i-0.5*F_ij
     return F/N
 end
@@ -262,7 +261,6 @@ function sweep_1graph_stab!(M::ParametricModel_1graph, iter::Int64, maxiter::Int
         belief[:,i]./=z_i
         F_i += (0.5*di-1.0)*log(z_i)
     end
-    #@show F_ij/N, F_i/N
     F=F_i-0.5*F_ij
     if (iter > maxiter - nbstab)
         Δ/=Nedges
@@ -273,23 +271,24 @@ function sweep_1graph_stab!(M::ParametricModel_1graph, iter::Int64, maxiter::Int
 end
 
 function pop_dynamics_1graph(M::ParametricModel_1graph; tot_iter=5)
-    F=0.0
-    println("#1.iter 2.F")
+    println("#1.iter 2.conv_crit")
     flush(stdout)
+    Fold=Inf
     for iterations=1:tot_iter
         F=sweep_1graph!(M)
-        println(iterations, "\t", F)
+        println(iterations, "\t", abs(F-Fold))
+        Fold=F
         flush(stdout)
     end
 end
 function pop_dynamics_1graph_stab(M::ParametricModel_1graph; tot_iter=5)
-    F=0.0
-    println("#1.iter 2.F 3.Δ")
+    println("#1.iter 2.conv_crit 3.Δ")
     flush(stdout)
+    Fold=Inf
     for iterations=1:tot_iter
-        flush(stdout)
         F, Δ = sweep_1graph_stab!(M, iterations, tot_iter)
-        println(iterations, "\t", F, "\t", Δ)
+        println(iterations, "\t", abs(F-Fold), "\t", Δ)
+        Fold=F
         flush(stdout)
     end
 end

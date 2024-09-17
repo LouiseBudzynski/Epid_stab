@@ -108,33 +108,18 @@ end
 
 function sweep_stab!(M, iter, maxiter; nbstab = round(maxiter/2))
     N = popsize(M)
-    F_itoj = zero(M.λi * M.p_sympt_inf)
-    Fψi = zero(M.λi * M.p_sympt_inf)
+    logzi = 0.0
+    #F = 0.0
     Δt = 0.0
     for l = 1:N
-        # compute free-energy (and update belief):
-        xi0,sij,sji,d,oi,sympt,ci,ti_obs = rand_disorder(M,M.distribution)
-        M.obs_list[l] = oi 
-        neighbours = rand(1:N,d)
-        for m = 1:d
-            res_neigh = [neighbours[1:m-1];neighbours[m+1:end]]
-            calculate_ν!(M,res_neigh,xi0,oi,sympt,ci,ti_obs)
-            r = 1.0 / log(1-M.λp)
-            sij = floor(Int,log(rand())*r) + 1
-            sji = floor(Int,log(rand())*r) + 1
-            zψij = original_normalization(M,M.ν,sji)
-            F_itoj += log(zψij)
-        end
-        zψi = calculate_belief!(M,l,neighbours,xi0,oi,sympt,ci,ti_obs)
-        Fψi += (0.5 * d - 1) * log(zψi) 
-
         # update μ and mom1μ
         xi0,sij,sji,d,oi,sympt,ci,ti_obs = rand_disorder(M,M.distribution)
         neighbours = rand(1:N,d-1)
         calculate_ν!(M,neighbours,xi0,oi,sympt,ci,ti_obs)
         zψij = original_normalization(M,M.ν,sji)
+        #F -= 0.5*d*log(zψij)
         update_μ!(M,l,sij,sji) 
-        if (iter > maxiter - nbstab - 1)
+        if (iter > maxiter - nbstab)
             M.mom1ν.=0.0
             for val in neighbours
                 calculate_ν_stab!(M,val,neighbours,xi0,oi,sympt,ci,ti_obs)
@@ -146,13 +131,22 @@ function sweep_stab!(M, iter, maxiter; nbstab = round(maxiter/2))
             Δt+=delt
             update_mom1μ!(M,l,sij,sji)
         end
+
+        # update belief
+        xi0,sij,sji,d,oi,sympt,ci,ti_obs = rand_disorder(M,M.distribution)
+        M.obs_list[l] = oi 
+        zψi = calculate_belief!(M,l,neighbours,xi0,oi,sympt,ci,ti_obs)
+        logzi += log(zψi) 
+        #F+=(0.5*d-1)*log(zψi)
     end
-    if (iter > round(maxiter/2))
+    if (iter > maxiter - nbstab)
         Δt = Δt/N
     else
-        Δt=-1.0
+        Δt=-1
     end
-    return (Fψi - 0.5 * F_itoj) / N, Δt
+    @show 
+#    return F / N, Δt
+    return logzi/N, Δt
 end
 
 function sweep!(M)
@@ -184,7 +178,6 @@ function sweep!(M)
         zψi = calculate_belief!(M,l,neighbours,xi0,oi,sympt,ci,ti_obs)
         Fψi += (0.5 * d - 1) * log(zψi) 
     end
-    #@show F_itoj/N, Fψi/N
     return (Fψi - 0.5 * F_itoj) / N 
 end
 
@@ -262,42 +255,26 @@ marg = M.belief |> real
 
 
 """
-function pop_dynamics_stab(M; filepr="", tot_iterations = 5, nbstab = round(tot_iterations/2), tol = 1e-10,nonlearn_iters=0,stop_at_convergence=true)
-    N, T, F = popsize(M), M.T, zero(M.λi * M.p_sympt_inf)
-    F_window = zeros(10)
-    converged = false
-    err=-1
+function pop_dynamics_stab(M; tot_iterations = 10, nbstab = round(tot_iterations/2))
+    N, T = popsize(M), M.T
 
-    #correct initial condition
+    #uniform initial condition
     M.ν.=1/((T+1)^4)
     for l in 1:N
-        (xi0, sij, sji, d, oi, sympt, ci, ti_obs) = rand_disorder(M, degree_dist)
+        (xi0, sij, sji, d, oi, sympt, ci, ti_obs) = rand_disorder(M, M.distribution)
         update_μ!(M,l,sij, sji)
     end
     
-    println("#1.iter 2.err 3.F 4. Δ")
-    for iterations = 0:tot_iterations-1
-        F, Δ = sweep_stab!(M, iterations, tot_iterations, nbstab=nbstab) 
-        #compute observables
-        if mod(iterations,10)==0 && length(filepr)>0
-            marg = M.belief |> real;
-            marg2D = reshape(sum(marg,dims=3) ./ N, T+2,T+2)
-            planted=cumsum(sum(marg2D,dims=1)[1:end-1],dims=1)
-            inferred=cumsum(sum(marg2D,dims=2)[1:end-1],dims=1)
-            ensAUC = avgAUC(marg,M.obs_list,count_obs=true); #set false to see the AUC only on NON observed indiv. 
-            open(filepr, "a") do io
-                writedlm(io, [vcat([iterations],round.(planted,digits=4))])
-                writedlm(io, [vcat([iterations],round.(inferred,digits=4))])
-                writedlm(io, [vcat([iterations],round.(ensAUC,digits=4))])
-            end                
-        end
-        #compute error, print results
-        F_window[mod(iterations,length(F_window))+1] = (F |> real)
-        (iterations > length(F_window)) && ((converged, err) = check_convergence(F_window,tol,stop_at_convergence))
-        println(iterations, "\t", err, "\t", F, "\t", Δ)
+    conv_crit_old=Inf
+    println("#1.iter 2.conv_crit 3.F 4. Δ")
+    for iterations = 1:tot_iterations
+        #F, Δ = sweep_stab!(M, iterations, tot_iterations, nbstab=nbstab) 
+        conv_crit, Δ = sweep_stab!(M, iterations, tot_iterations, nbstab=nbstab) 
+        #println(iterations, "\t", err, "\t", F, "\t", Δ)
+        println(iterations, "\t", abs(conv_crit_old-conv_crit), "\t", Δ, "\t")
+        conv_crit_old=conv_crit
         flush(stdout)
     end
-    return F_window |> real , tot_iterations
 end
 
 function pop_dynamics(M; tot_iterations = 5, tol = 1e-10, eta = 0.0, infer_lam=false, infer_gam = false,infer_sympt=false,nonlearn_iters=0,stop_at_convergence=true)
@@ -307,16 +284,6 @@ function pop_dynamics(M; tot_iterations = 5, tol = 1e-10, eta = 0.0, infer_lam=f
     lam_window = zeros(10)
     gam_window = zeros(10)
     sympt_window = zeros(10)
-    err=-1
-
-    #correct initial condition
-    M.ν.=1/((T+1)^4)
-    for l in 1:N
-        (xi0, sij, sji, d, oi, sympt, ci, ti_obs) = rand_disorder(M, degree_dist)
-        update_μ!(M,l,sij, sji)
-    end
-
-    println("#1.iter 2.err 3.F")
     for iterations = 0:tot_iterations-1
         wflag = mod(iterations,10)+1
         lam_window[wflag] = M.λi |> real
@@ -327,11 +294,10 @@ function pop_dynamics(M; tot_iterations = 5, tol = 1e-10, eta = 0.0, infer_lam=f
         infer_lam = check_prior(iterations, infer_lam, lam_window, eta, nonlearn_iters)
         infer_gam = check_prior(iterations, infer_gam, gam_window, eta, nonlearn_iters)
         infer_sympt = check_prior(iterations, infer_sympt, sympt_window, eta, nonlearn_iters)
-        (iterations > length(F_window)) && ((converged, err) = check_convergence(F_window,tol,stop_at_convergence))
-        println(iterations, "\t", err, "\t", F)
-        #if converged  & !infer_lam & !infer_gam & !infer_sympt #if we don't have to infer 
-        #    return F_window |> real, iterations+1
-        #end
+        (iterations > length(F_window)) && (converged = check_convergence(F_window,2/sqrt(N),stop_at_convergence))
+        if converged  & !infer_lam & !infer_gam & !infer_sympt #if we don't have to infer 
+            return F_window |> real, iterations+1
+        end
         (infer_lam) && (update_lam!(M,F,eta))
         (infer_gam) && (update_gam!(M))
         (infer_sympt) && (update_sympt!(M,F,eta))
@@ -386,9 +352,9 @@ function check_convergence(window,tol,stop_at_convergence)
     variance = sum(window .^ 2)/l - avg ^ 2
     err = abs(variance) > 1e-15 ? sqrt(variance) : 0.0
     if (err <= tol) 
-        return stop_at_convergence, err
+        return stop_at_convergence
     else 
-        return false, err
+        return false
     end
 end
 
