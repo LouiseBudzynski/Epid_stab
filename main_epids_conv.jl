@@ -1,9 +1,11 @@
 import OffsetArrays
 using StatsBase
-using Graphs, IndexedGraphs
-using Distributions,UnPack,OffsetArrays
+using Distributions
 srcpath = "./src"
-include("$srcpath/post_infer_1graph.jl") 
+include("$srcpath/bp.jl") #functions for bp update
+include("$srcpath/bp_stab.jl") #additional functions for commputing stability parameter
+include("$srcpath/post_infer.jl") #main functions
+include("$srcpath/observables.jl") #functions for estimating observables
 
 function main(args)
     arg_gam=parse(Float64, args[1])
@@ -20,15 +22,14 @@ function main(args)
     N = arg_N; #population size
     dilution = 0.0 #dilution of observations. dil=0 means everybody observed once
     fr = 0.0; #noise in the observation. 
-    maxd=3
-    degree_dist = Dirac(maxd) #the distribution of the degree in the graph. Dirac means random regular.
+    degree_dist = Dirac(3) #the distribution of the degree in the graph. Dirac means random regular.
     param=[T, λp, λi, γp, γi, N, dilution, fr, degree_dist]
 
     println("#param=[T, λp, λi, γp, γi, N, dilution, fr, degree_dist]=", param)
     #init pop
-    M=ParametricModel_1graph(N=N,T=T,γp=γp,λp=λp,γi=γi,λi=λi,fr=fr,dilution=dilution,distribution=degree_dist,maxd=maxd);
+    M = ParametricModel(N=N,T=T,γp=γp,λp=λp,γi=γi,λi=λi,fr=fr,dilution=dilution,distribution=degree_dist);
     #iterations
-    pop_dynamics_1graph_stab(M, tot_iter=arg_maxiter)
+    pop_dynamics(M, tot_iterations = arg_maxiter, stop_at_convergence=false);
     return 0
 end
 main(ARGS)

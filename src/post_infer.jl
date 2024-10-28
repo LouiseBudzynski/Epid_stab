@@ -144,7 +144,6 @@ function sweep_stab!(M, iter, maxiter; nbstab = round(maxiter/2))
     else
         Δt=-1
     end
-    @show 
 #    return F / N, Δt
     return logzi/N, Δt
 end
@@ -266,7 +265,7 @@ function pop_dynamics_stab(M; tot_iterations = 10, nbstab = round(tot_iterations
     end
     
     conv_crit_old=Inf
-    println("#1.iter 2.conv_crit 3.F 4. Δ")
+    println("#1.iter 2.conv_crit 3.Δ")
     for iterations = 1:tot_iterations
         #F, Δ = sweep_stab!(M, iterations, tot_iterations, nbstab=nbstab) 
         conv_crit, Δ = sweep_stab!(M, iterations, tot_iterations, nbstab=nbstab) 
@@ -284,12 +283,15 @@ function pop_dynamics(M; tot_iterations = 5, tol = 1e-10, eta = 0.0, infer_lam=f
     lam_window = zeros(10)
     gam_window = zeros(10)
     sympt_window = zeros(10)
+    println("#1.iter 2.F")
     for iterations = 0:tot_iterations-1
         wflag = mod(iterations,10)+1
         lam_window[wflag] = M.λi |> real
         gam_window[wflag] = M.γi |> real
         sympt_window[wflag] = M.p_sympt_inf |> real
         F = sweep!(M) 
+        println(iterations, "\t", F)
+        flush(stdout)
         F_window[mod(iterations,length(F_window))+1] = (F |> real)
         infer_lam = check_prior(iterations, infer_lam, lam_window, eta, nonlearn_iters)
         infer_gam = check_prior(iterations, infer_gam, gam_window, eta, nonlearn_iters)
