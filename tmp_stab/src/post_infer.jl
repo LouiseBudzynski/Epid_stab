@@ -108,7 +108,8 @@ end
 
 function sweep_stab!(M, iter, maxiter; nbstab = round(maxiter/2))
     N = popsize(M)
-    F = 0.0
+    logzi = 0.0
+    #F = 0.0
     Δt = 0.0
     for l = 1:N
         # update μ and mom1μ
@@ -116,7 +117,7 @@ function sweep_stab!(M, iter, maxiter; nbstab = round(maxiter/2))
         neighbours = rand(1:N,d-1)
         calculate_ν!(M,neighbours,xi0,oi,sympt,ci,ti_obs)
         zψij = original_normalization(M,M.ν,sji)
-        F -= 0.5*d*log(zψij)
+        #F -= 0.5*d*log(zψij)
         update_μ!(M,l,sij,sji) 
         if (iter > maxiter - nbstab)
             M.mom1ν.=0.0
@@ -134,16 +135,17 @@ function sweep_stab!(M, iter, maxiter; nbstab = round(maxiter/2))
         # update belief
         xi0,sij,sji,d,oi,sympt,ci,ti_obs = rand_disorder(M,M.distribution)
         M.obs_list[l] = oi 
-        neighbours = rand(1:N,d)
         zψi = calculate_belief!(M,l,neighbours,xi0,oi,sympt,ci,ti_obs)
-        F+=(0.5*d-1)*log(zψi)
+        logzi += log(zψi) 
+        #F+=(0.5*d-1)*log(zψi)
     end
     if (iter > maxiter - nbstab)
         Δt = Δt/N
     else
         Δt=-1
     end
-    return F / N, Δt
+#    return F / N, Δt
+    return logzi/N, Δt
 end
 
 function sweep!(M)
@@ -262,10 +264,14 @@ function pop_dynamics_stab(M; tot_iterations = 10, nbstab = round(tot_iterations
         update_μ!(M,l,sij, sji)
     end
     
-    println("#1.iter 2.F 3.Δ")
+    conv_crit_old=Inf
+    println("#1.iter 2.conv_crit 3.Δ")
     for iterations = 1:tot_iterations
-        F, Δ = sweep_stab!(M, iterations, tot_iterations, nbstab=nbstab) 
-        println(iterations, "\t", F, "\t", Δ)
+        #F, Δ = sweep_stab!(M, iterations, tot_iterations, nbstab=nbstab) 
+        conv_crit, Δ = sweep_stab!(M, iterations, tot_iterations, nbstab=nbstab) 
+        #println(iterations, "\t", err, "\t", F, "\t", Δ)
+        println(iterations, "\t", abs(conv_crit_old-conv_crit), "\t", Δ, "\t")
+        conv_crit_old=conv_crit
         flush(stdout)
     end
 end
