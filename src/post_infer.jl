@@ -9,6 +9,7 @@ mutable struct ParametricModel{D,D2,Taux,M,M1,M2,O,Tλ,MO,Tsympt}
     λp::Float64
     γi::Float64
     λi::Tλ
+    σ0::Float64
     Paux::Taux
     μ::M
     mom1μ::M
@@ -29,39 +30,16 @@ mutable struct ParametricModel{D,D2,Taux,M,M1,M2,O,Tλ,MO,Tsympt}
     p_test_inf::Float64
 end
 
-"""
-    ParametricModel(; N, T, γp, λp, 
-    γi = γp, λi = λp, fr = 0.0, dilution = 0.0, distribution, obs_range=T:T, field=0.0, p_sympt_pla=0.0, p_test_pla = 1 - dilution, p_sympt_inf = p_sympt_pla, p_test_inf = p_test_pla)
-
-Constructor of the ParametricModel struct.
-
-# Arguments
-- `N::Integer`: the number of messages in the population.
-- `T::Integer`: the number of time steps
-- `γp::Float64`: the planted patient zero parameter
-- `λp::Float64`: the planted infection parameter
-- `γi::Float64`: the patient zero parameter used in inference. If not specified, it is set to the planted value.
-- `λi::Tλ`: the patient zero parameter used in inference. If not specified, it is set to the planted value. The type is general in order to allow autoderviation.
-- `fr::Float64`: the false rate (fr) of observations (i.e. clinical tests). If not specified, it is set to 0, namely perfect observations.
-- `dilution::Float64`: the dilution of observations, i.e. the fraction of non-observed individuals. If not specified, it is set to 0.
-- `distribution::D`: the degree distribution. The type is general because each distribution corresponds to a specific type. See the package `Distributions`.   
-- `obs_range::UnitRange{Int64}`: the time range in which observations are scattered. If not specified, it is set to T:T, meaning that all the observations are at final time. For example, setting obs_range=T-3:T means that observations are scattered on the interval [T-3,T]
-- `field::Float64`: an artificial field between 0 and 1 which couples the planted and the inferred trajectory. It is used to explore possible metastabilities of the BP equation. It is set to 0 at default. 
-- `p_sympt_pla::Float64`: the probability to be develop sympthoms, which in our model always implies to be tested. This probaiblity, threrefore, is a bias towards infectious individuals.
-- `p_test_pla::Float64`: the probability to be tested regardless on the state. Look at the main paper for the explanation of this parameter
-- `p_sympt_inf::Tsympt`: the sympthom probability used in the inference process. The type in generic to allow inference of the parameter 
-- `p_tes_inf::Float64`: the probability to be tested used in inference.
-"""
-function ParametricModel(; N, T, γp, λp, γi=γp, λi=λp, fr=0.0, dilution=0.0, distribution, obs_range=T:T,field=0.0,p_sympt_pla=0.0,p_test_pla=1-dilution,p_sympt_inf=p_sympt_pla,p_test_inf=p_test_pla)
+function ParametricModel(; N, T, γp, λp, γi=γp, λi=λp, σ0=1e-4, fr=0.0, dilution=0.0, distribution, obs_range=T:T,field=0.0,p_sympt_pla=0.0,p_test_pla=1-dilution,p_sympt_inf=p_sympt_pla,p_test_inf=p_test_pla)
     μ = fill(one(λi * p_sympt_inf) / (6*(T+2)^2), 0:T+1, 0:1, 0:T+1, 0:2, 1:N)
-    mom1μ = OffsetArray(rand(-1:2:1, T+2, 2, T+2, 3, N).*0.00001, 0:T+1, 0:1, 0:T+1, 0:2, 1:N)
+    mom1μ = OffsetArray(rand(-1:2:1, T+2, 2, T+2, 3, N).*σ0, 0:T+1, 0:1, 0:T+1, 0:2, 1:N)
     belief = fill(zero(λi * p_sympt_inf), 0:T+1, 0:T+1, N)
     ν = fill(zero(λi * p_sympt_inf), 0:T+1, 0:T+1, 0:T+1, 0:2)
     tmpν = fill(zero(λi * p_sympt_inf), 0:T+1, 0:T+1, 0:T+1, 0:2)
     mom1ν = fill(zero(λi * p_sympt_inf), 0:T+1, 0:T+1, 0:T+1, 0:2)
     Paux = fill(zero(λi * p_sympt_inf), 0:1, 0:2)
     Λ = OffsetArray([t <= 0 ? one(λi) : (1-λi)^t for t = -T-2:T+1], -T-2:T+1)
-    ParametricModel(T, γp, λp,γi, λi,Paux, μ, mom1μ, belief, ν, tmpν, mom1ν,fr, distribution, residual(distribution), Λ,fill(false,N),obs_range,field,p_sympt_pla,p_test_pla,p_sympt_inf,p_test_inf)
+    ParametricModel(T, γp, λp,γi, λi, σ0,Paux, μ, mom1μ, belief, ν, tmpν, mom1ν,fr, distribution, residual(distribution), Λ,fill(false,N),obs_range,field,p_sympt_pla,p_test_pla,p_sympt_inf,p_test_inf)
 end
 
 
@@ -211,47 +189,7 @@ function logsweep!(M)
     return (Fψi - 0.5 * F_itoj) / N 
 end
 
-"""
-    pop_dynamics(M; tot_iterations = 5, tol = 1e-10, eta = 0.0, infer_lam=false, infer_gam = false,infer_sympt=false,nonlearn_iters=0,stop_at_convergence=true)
 
-Takes as input the parametric model and runs the replica symmetric cavity equations to update the population of messages. Returns the Bethe free energy and the iterations for convergence, if reached. 
-
-# Arguments
-- `M::ParametricModel`.
-- `tot_iterations::Integer`: the number of iterations of population dynamics
-- `tol::Float64`: tolerance for convergence criterion
-- `eta::Float64`: the learning rate in hyper-parameters inference
-- `infer_lam::Bool`: set it to `true` for inferring the infection hyper-parameter 
-- `infer_gam::Bool`: set it to `true` for inferring the patient zero hyper-parameter 
-- `infer_sympt::Bool`: set it to `true` for inferring the sympthoms probability
-- `nonlearn_iters::Int`: the number of iterations to skip before starting inference of hyper-parameters.
-- `stop_at_convergence::Bool`: set it to `false` for making the algorithm run after convergence too. 
-
-# Example:
-```jldoctest
-λp = 0.2                 #planted infection rate
-T = 8                    #number of time-steps
-γp = 0.1                 #planted autoinfection probability
-N = 10000                #population size 
-degree_dist = Dirac(3)   #degree distribution of the graph
-
-# Initialize the model for cavity method
-M = ParametricModel(N = N, T = T, γp = γp, λp = λp, distribution=degree_dist)
-
-# Run the population dynamics algorithm
-pop_dynamics(M; tot_iterations = 100, tol = 1e-4)
-
-# For example here we want the population of marginals
-marg = M.belief |> real
-
-# marg[ti,τi,i] is the i_th marginal in the population. 
-# it represents the probability of inferring ti and having that 
-# the planted is τi.
-```
-
-
-
-"""
 function pop_dynamics_stab(M; tot_iterations = 10, nbstab = round(tot_iterations/2))
     N, T = popsize(M), M.T
 
@@ -261,12 +199,14 @@ function pop_dynamics_stab(M; tot_iterations = 10, nbstab = round(tot_iterations
         (xi0, sij, sji, d, oi, sympt, ci, ti_obs) = rand_disorder(M, M.distribution)
         update_μ!(M,l,sij, sji)
     end
-    
     println("#1.iter 2.F 3.Δ")
     for iterations = 1:tot_iterations
         F, Δ = sweep_stab!(M, iterations, tot_iterations, nbstab=nbstab) 
         println(iterations, "\t", F, "\t", Δ)
         flush(stdout)
+        if (iterations == tot_iterations - nbstab) 
+            M.mom1μ .= (M.mom1μ).*(M.μ)
+        end
     end
 end
 

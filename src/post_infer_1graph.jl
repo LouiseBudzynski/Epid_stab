@@ -9,6 +9,7 @@ mutable struct ParametricModel_1graph{M,M1,M2,O,Tλ}
     λp::Float64
     γi::Float64
     λi::Tλ
+    σ0::Float64
     μ::M
     mom1μ::M
     belief::M2
@@ -21,7 +22,7 @@ mutable struct ParametricModel_1graph{M,M1,M2,O,Tλ}
     Observations::BitVector
 end
 
-function ParametricModel_1graph(; N, T, γp, λp, γi=γp, λi=λp, fr=0.0, dilution=0.0, distribution, maxd)
+function ParametricModel_1graph(; N, T, γp, λp, γi=γp, λi=λp, σ0=1e-4, fr=0.0, dilution=0.0, distribution, maxd)
     Λ = OffsetArray([t <= 0 ? 1.0 : (1-λi)^t for t = -T-2:T+1], -T-2:T+1)
     μ = fill(0.0, 0:T+1, 0:1, maxd, N)
     for i in 1:N
@@ -34,7 +35,7 @@ function ParametricModel_1graph(; N, T, γp, λp, γi=γp, λi=λp, fr=0.0, dilu
             end
         end
     end
-    mom1μ = OffsetArray(rand(-1:2:1, T+2, 2, maxd, N).*0.00001, 0:T+1, 0:1, 1:maxd, 1:N)
+    mom1μ = OffsetArray(rand(-1:2:1, T+2, 2, maxd, N).*σ0, 0:T+1, 0:1, 1:maxd, 1:N)
     belief = fill(0.0, 0:T+1, N)
     ν = fill(0.0, 0:T+1, 0:T+1)
     tmpν = fill(0.0, 0:T+1, 0:T+1)
@@ -52,7 +53,7 @@ function ParametricModel_1graph(; N, T, γp, λp, γi=γp, λi=λp, fr=0.0, dilu
     x=Bool.(zeros(N,T+1))
     sample!(x,G,λp,γp)
     Observations=x[:,T+1]
-    ParametricModel_1graph(N, Nedges, T, γp, λp,γi, λi, μ, mom1μ, belief, ν, tmpν, mom1ν,fr, Λ,Neigh,Observations)
+    ParametricModel_1graph(N, Nedges, T, γp, λp,γi, λi, σ0, μ, mom1μ, belief, ν, tmpν, mom1ν,fr, Λ,Neigh,Observations)
 
 end
 
@@ -271,24 +272,23 @@ function sweep_1graph_stab!(M::ParametricModel_1graph, iter::Int64, maxiter::Int
 end
 
 function pop_dynamics_1graph(M::ParametricModel_1graph; tot_iter=5)
-    println("#1.iter 2.conv_crit")
+    println("#1.iter 2.F")
     flush(stdout)
-    Fold=Inf
     for iterations=1:tot_iter
         F=sweep_1graph!(M)
-        println(iterations, "\t", abs(F-Fold))
-        Fold=F
+        println(iterations, "\t", F)
         flush(stdout)
     end
 end
-function pop_dynamics_1graph_stab(M::ParametricModel_1graph; tot_iter=5)
-    println("#1.iter 2.conv_crit 3.Δ")
+function pop_dynamics_1graph_stab(M::ParametricModel_1graph; tot_iter=5, nbstab = round(tot_iter/2))
+    println("#1.iter 2.F 3.Δ")
     flush(stdout)
-    Fold=Inf
     for iterations=1:tot_iter
-        F, Δ = sweep_1graph_stab!(M, iterations, tot_iter)
-        println(iterations, "\t", abs(F-Fold), "\t", Δ)
-        Fold=F
+        F, Δ = sweep_1graph_stab!(M, iterations, tot_iter, nbstab=nbstab)
+        println(iterations, "\t", F, "\t", Δ)
         flush(stdout)
+        if (iterations == tot_iter - nbstab) 
+            M.mom1μ .= (M.mom1μ).*(M.μ)
+        end
     end
 end
