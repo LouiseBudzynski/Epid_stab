@@ -7,6 +7,7 @@ mutable struct ParametricModel_1graph{M,M1,M2,O,Tλ}
     T::Int
     γp::Float64
     λp::Float64
+    fixseednumber::Bool
     γi::Float64
     λi::Tλ
     σ0::Float64
@@ -22,7 +23,7 @@ mutable struct ParametricModel_1graph{M,M1,M2,O,Tλ}
     Observations::BitVector
 end
 
-function ParametricModel_1graph(; N, T, γp, λp, γi=γp, λi=λp, σ0=1e-4, fr=0.0, dilution=0.0, distribution, maxd)
+function ParametricModel_1graph(; N, T, γp, λp, fixseednumber=true, γi=γp, λi=λp, σ0=1e-4, fr=0.0, dilution=0.0, distribution, maxd)
     Λ = OffsetArray([t <= 0 ? 1.0 : (1-λi)^t for t = -T-2:T+1], -T-2:T+1)
     μ = fill(0.0, 0:T+1, 0:1, maxd, N)
     for i in 1:N
@@ -51,9 +52,9 @@ function ParametricModel_1graph(; N, T, γp, λp, γi=γp, λi=λp, σ0=1e-4, fr
     end    
     Nedges=Int64(Nedges/2)
     x=Bool.(zeros(N,T+1))
-    sample!(x,G,λp,γp)
+    sample!(x,G,λp,γp,nbseedsfixed=fixseednumber)
     Observations=x[:,T+1]
-    ParametricModel_1graph(N, Nedges, T, γp, λp,γi, λi, σ0, μ, mom1μ, belief, ν, tmpν, mom1ν,fr, Λ,Neigh,Observations)
+    ParametricModel_1graph(N, Nedges, T, γp, λp,fixseednumber, γi, λi, σ0, μ, mom1μ, belief, ν, tmpν, mom1ν,fr, Λ,Neigh,Observations)
 
 end
 
@@ -67,11 +68,23 @@ end
 function makeGraph(Ngraph,degree_dist::Dirac)
     return random_regular_graph(Ngraph,degree_dist.value) |> IndexedBiDiGraph 
 end
-function sample!(x, G, λi, γi)
+function sample!(x, G, λi, γi; nbseedsfixed=false)
     x .= 0
     N, T = size(x)
     for i=1:N
         x[i,1] = rand() < γi
+    end
+    #@show length(x[:,1])*γi
+    if nbseedsfixed
+        i=0
+        while abs(sum(x[:,1])-length(x[:,1])*γi)>0.0
+            #@show sum(x[:,1])
+            i+=1
+            for i=1:N
+                x[i,1] = rand() < γi
+            end               
+        end
+        #@show i, sum(x[:,1])
     end
     for t = 2:T
         for i = 1:N
