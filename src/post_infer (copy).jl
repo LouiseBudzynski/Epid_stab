@@ -43,6 +43,26 @@ function ParametricModel(; N, T, γp, λp, γi=γp, λi=λp, σ0=1e-4, fr=0.0, d
 end
 
 
+
+function update_lam!(M,F::ComplexF64,eta)
+    @unpack T,Λ = M
+    ∂F = F.im / M.λi.im
+    dλ = - sign(∂F) * eta * M.λi.re #SignDescender
+    M.λi = clamp(M.λi.re + dλ,0.0,0.99) + im * M.λi.im
+    Λ .= OffsetArray([t <= 0 ? 1.0 : (1-M.λi)^t for t = -T-2:T+1], -T-2:T+1)
+end
+
+function update_sympt!(M,F::ComplexF64,eta)
+    @unpack T,Λ = M
+    ∂F = F.im / M.p_sympt_inf.im
+    dsympt = - sign(∂F) * eta * M.p_sympt_inf.re #SignDescender
+    M.p_sympt_inf = clamp(M.p_sympt_inf.re + dsympt,0.0,0.99) + im * M.p_sympt_inf.im
+end
+
+function update_gam!(M)
+    M.γi = (sum(M.belief[0,:,:]) / popsize(M)).re
+end
+
 #=function avg_err(b)
     N = size(b,3)
     T = size(b,1) - 2
@@ -136,6 +156,39 @@ function sweep!(M)
     return (Fψi - 0.5 * F_itoj) / N 
 end
 
+function logsweep!(M)
+    e = 1 #edge counter
+    N = popsize(M)
+    F_itoj = zero(M.λi * M.p_sympt_inf)
+    Fψi = zero(M.λi * M.p_sympt_inf)
+    for l = 1:N
+        # Extraction of disorder: state of individual i: xi0, delays: sij and sji
+        xi0,sij,sji,d,oi,sympt,ci,ti_obs = rand_disorder(M,M.distribution)
+        M.obs_list[l] = oi #this is stored for later estimation of AUC
+        neighbours = rand(1:N,d)
+        for m = 1:d
+            res_neigh = [neighbours[1:m-1];neighbours[m+1:end]]
+            logmaxν = calculate_logν!(M,res_neigh,xi0,oi,sympt,ci,ti_obs)
+            #from the un-normalized ν message it is possible to extract the orginal-message 
+            #normalization z_i→j 
+            # needed for the computation of the Bethe Free energy
+            r = 1.0 / log(1-M.λp)
+            sij = floor(Int,log(rand())*r) + 1
+            sji = floor(Int,log(rand())*r) + 1
+            zψij = original_normalization(M,M.ν,sji)
+            F_itoj += log(zψij) + logmaxν 
+            # Now we use the ν vector just calculated to extract the new μ.
+            # We overwrite the μ in postition μ[:,:,:,:,l]
+            update_μ!(M,e,sij,sji)  
+            e = mod(e,N) + 1
+        end
+        logzψi = calculate_logbelief!(M,l,neighbours,xi0,oi,sympt,ci,ti_obs)
+        Fψi += (0.5 * d - 1) * logzψi 
+    end
+    
+    return (Fψi - 0.5 * F_itoj) / N 
+end
+
 
 function pop_dynamics_stab(M; tot_iterations = 10, nbstab = round(tot_iterations/2), observ = false)
     N, T = popsize(M), M.T
@@ -202,6 +255,34 @@ function pop_dynamics(M; tot_iterations = 5, tol = 1e-10, eta = 0.0, infer_lam=f
     return F_window |> real , tot_iterations
 end
 
+function logpop_dynamics(M; tot_iterations = 5, tol = 1e-10, eta = 0.0, infer_lam=false, infer_gam = false,infer_sympt=false,nonlearn_iters=0,stop_at_convergence=true)
+    N, T, F = popsize(M), M.T, zero(M.λi * M.p_sympt_inf)
+    F_window = zeros(10)
+    converged = false
+    lam_window = zeros(10)
+    gam_window = zeros(10)
+    sympt_window = zeros(10)
+    for iterations = 0:tot_iterations-1
+        wflag = mod(iterations,10)+1
+        lam_window[wflag] = M.λi |> real
+        gam_window[wflag] = M.γi |> real
+        sympt_window[wflag] = M.p_sympt_inf |> real
+        F = logsweep!(M) 
+        F_window[mod(iterations,length(F_window))+1] = (F |> real)
+        infer_lam = check_prior(iterations, infer_lam, lam_window, eta, nonlearn_iters)
+        infer_gam = check_prior(iterations, infer_gam, gam_window, eta, nonlearn_iters)
+        infer_sympt = check_prior(iterations, infer_sympt, sympt_window, eta, nonlearn_iters)
+        (iterations > length(F_window)) && (converged = check_convergence(F_window,2/sqrt(N),stop_at_convergence))
+        if converged  & !infer_lam & !infer_gam & !infer_sympt #if we don't have to infer 
+            return F_window |> real, iterations+1
+        end
+        (infer_lam) && (update_lam!(M,F,eta))
+        (infer_gam) && (update_gam!(M))
+        (infer_sympt) && (update_sympt!(M,F,eta))
+    end
+    return F_window |> real , tot_iterations
+end
+
 
 
 function check_prior(iterations, infer, window, eta,nonlearn)
@@ -227,3 +308,49 @@ function check_convergence(window,tol,stop_at_convergence)
     end
 end
 
+#=function check_convergenceObsolete(avg_new, err_new, avg_old, err_old, tol)
+    prod(abs.(avg_new .- avg_old) .<= (tol .+ (err_old .+ err_new)))
+end=#
+
+function prior_entropy(M)
+    N = popsize(M)
+    s = 0
+    r = 1.0 / log(1-M.λp)
+    T = M.T
+    planted_times = rand(0:T+1,N)
+    for iters = 1:10
+        s = 0
+        for i = 1:N
+            xi0 = (rand() < M.γp); #zero patient
+            d = rand(M.distribution) # number of neighbours
+            neighb = rand(1:N,d)
+            #fill the entering delays
+            delays_out = zeros(d)
+            for j in 1:d
+                delays_out[j] = floor(Int,log(rand())*r) + 1 
+            end
+            #compute the new planted time
+            ti = Int((!xi0) * min(minimum(planted_times[neighb] .+ delays_out),T+1)) 
+            S1 = S2 = 0
+            for j in 1:d
+                tj = planted_times[neighb[j]]
+                #@show tj
+                theta_ij = ((ti - tj - 1) >= 0 )
+                S1 += theta_ij ? (ti - tj - 1) : 0
+                S2 += theta_ij
+            end
+            #@show ti, S1, S2, psi(M,ti,S1,S2)
+            s -= log(psi(M,ti,S1,S2))
+            planted_times[i] = ti
+        end
+    end
+    return s/N,planted_times
+end
+
+function δλ(infer_lam)
+    if infer_lam
+        return 0.001im
+    else
+        return 0.0
+    end
+end
