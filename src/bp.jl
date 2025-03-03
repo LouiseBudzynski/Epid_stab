@@ -275,65 +275,6 @@ function update_μ!(M,l,sij,sji)
     μ[:,:,:,:,l] ./= S
 end
 
-function energy(M) #this function computes the energy by only modifying the nu messages
-    @assert M.fr == 0.0 "function usable only for fr=0"
-    N = popsize(M)
-    T = M.T
-    #we take the converged population and compute the energy
-    u = zero(eltype(M.ν))
-    for i = 1:N
-        xi0,sij_,sji_,d,oi,sympt_i,ci,ti_obs = rand_disorder(M,M.distribution)
-        msg = fill(zero(eltype(M.ν)),0:T+1, 0:T+1, 0:T+1, 0:2, d)
-        #We need the messages on ti,tj. However, on mu messages we already have summed over tj
-        #So we need to pass from mu to nu messages and again from nu to desired cavities
-        for pos = 1:d # compute each cavity marginal
-            xj0,sji,sij,d_res,oj,sympt_j,cj,tj_obs = rand_disorder(M,M.residual)
-            cav_neighbours = rand(1:N,d_res)
-            calculate_ν!(M,cav_neighbours,xj0,oj,sympt_j,cj,tj_obs)
-            #due to BP equations, the original factor-to-node msg is equal to node-to-factor msg
-            # since nu is almost the same to the original message, we just have to
-            #trace over nu in order to get the inferred cavity marginals
-            inferred_times_msg!(msg,pos,M,sji,sij,xi0)
-            #@show xi0, xj0, sij, sji
-            #@show sum(M.μ),sum(msg[:,:,:,:,pos])
-        end
-        F∂i = fill(zero(eltype(M.ν)),0:T+1,0:d*T,0:d,0:2,0:T+1)
-        if xi0 == 1
-            F∂i[:,0,0,0,:] .= 1
-        else
-            F∂i[:,0,0,1,:] .= 1
-            F∂i[:,0,0,2,0:T] .= -1
-        end
-        F∂iold = fill(zero(eltype(M.ν)),0:T+1,0:d*T,0:d,0:2,0:T+1) #tmp to use to update 
-        # now that we have the messages, we must compute the measure iteratively
-        for pos = 1:d
-            update_measure!(F∂i,F∂iold,pos,d,msg,M)
-        end
-        # we finally evaluate the energy per site
-        z_psi = zero(eltype(M.ν))
-        u_psi = zero(eltype(M.ν))
-        for taui = 0:T+1
-            for ti = 0:T+1
-                ξ = obs(M,ti,taui,oi,sympt_i,ci,ti_obs)
-                if ξ == 0.0 
-                    continue 
-                end
-                for S1 = 0:d*T
-                    for S2 = 0:d
-                        for v = 0:2
-                            if !iszero(F∂i[ti,S1,S2,v,taui]) && !iszero(psi(M,ti,S1,S2)) 
-                                z_psi += psi(M,ti,S1,S2) * F∂i[ti,S1,S2,v,taui]
-                                u_psi += psi(M,ti,S1,S2) * log(psi(M,ti,S1,S2)) *  F∂i[ti,S1,S2,v,taui]
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        u -= u_psi / z_psi
-    end
-    return u/N
-end
 
 function update_measure!(F∂i,F∂iold,pos,d,msg,M)
     T = M.T
