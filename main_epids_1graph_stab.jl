@@ -15,16 +15,16 @@ function main(args)
 
     #set parameters
     T = 8 # discrete time: number of time-steps
-    λp = 1.0# planted infection rate
-    λi = λp #inferred infection rate
-    γp = arg_gam #0.019 # planted autoinfection probability
+    λp = 1.0 # planted infection rate
+    λi = λp # inferred infection rate
+    γp = arg_gam # planted autoinfection probability
     γi = γp # inferred autoinfection probability
     σ0 = arg_sig0 # magnitude IC for perturbation
-    N = arg_N; #population size
-    dilution = 0.0 #dilution of observations. dil=0 means everybody observed once
-    fr = 0.0; #noise in the observation. 
+    N = arg_N; # population size
+    dilution = 0.0 # dilution of observations. dil=0 means everybody observed once
+    fr = 0.0; # noise in the observation. 
     maxd=3
-    degree_dist = Dirac(maxd) #the distribution of the degree in the graph. Dirac means random regular.
+    degree_dist = Dirac(maxd) # distribution of the degree in the graph (Dirac = random regular).
     param=[T, λp, λi, γp, γi, N, dilution, fr, degree_dist, fixseeds]
 
     println("#param=[T, λp, λi, γp, γi, N, dilution, fr, degree_dist, fixseeds]=", param)
