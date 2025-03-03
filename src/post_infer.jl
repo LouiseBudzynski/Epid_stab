@@ -190,7 +190,7 @@ function logsweep!(M)
 end
 
 
-function pop_dynamics_stab(M; tot_iterations = 10, nbstab = round(tot_iterations/2))
+function pop_dynamics_stab(M; tot_iterations = 10, nbstab = round(tot_iterations/2), observ = false)
     N, T = popsize(M), M.T
 
     #uniform initial condition
@@ -199,10 +199,24 @@ function pop_dynamics_stab(M; tot_iterations = 10, nbstab = round(tot_iterations
         (xi0, sij, sji, d, oi, sympt, ci, ti_obs) = rand_disorder(M, M.distribution)
         update_μ!(M,l,sij, sji)
     end
-    println("#1.iter 2.F 3.Δ")
+    if observ
+        println("#1.iter 2.F 3.Δ 4.MMO[t=0] 5.AUC[t=0]")
+    else
+        println("#1.iter 2.F 3.Δ")
+    end
     for iterations = 1:tot_iterations
         F, Δ = sweep_stab!(M, iterations, tot_iterations, nbstab=nbstab) 
-        println(iterations, "\t", F, "\t", Δ)
+        if observ
+            MMO = avgOverlap(M.belief)
+            if iterations >= tot_iterations-5
+                ensAUC = avgAUC(M.belief,M.obs_list,count_obs=true)
+                println(iterations, "\t", F, "\t", Δ, "\t", MMO[1], "\t", ensAUC[1])
+            else
+                println(iterations, "\t", F, "\t", Δ, "\t", MMO[1])
+            end
+        else
+            println(iterations, "\t", F, "\t", Δ)
+        end
         flush(stdout)
         if (iterations == tot_iterations - nbstab) 
             M.mom1μ .= (M.mom1μ).*(M.μ)
